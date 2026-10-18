@@ -619,11 +619,9 @@ body {
   white-space: nowrap;
 }
 
-/* ==================== 右栏：本次藏品 ==================== */
+/* ==================== 本次藏品（左栏，文件识别下面） ==================== */
 .stash-panel {
-  flex: 0 1 auto;
-  min-height: 120px;
-  max-height: 42%;
+  flex: 0 0 auto;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -631,25 +629,28 @@ body {
 
 .stash-panel .panel-head {
   flex: 0 0 auto;
-  margin-bottom: 8px;
+  margin-bottom: 10px;
 }
 
+/*
+ * --stash-unit 是「图鉴里一个小占格的边长」。卡片按真实占格等比放大：
+ * 占格 2×4 就是 4 格宽 2 格高，和游戏背包里看到的形状一致。
+ * 这一栏有一千来像素宽，用这个尺寸缩略图才看得清（原先挤在 400px 右栏里只有 44px）。
+ */
 .stash-rows {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
-  overflow-x: hidden;
+  --stash-unit: 56px;
+  flex: 0 0 auto;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
   padding-right: 2px;
 }
 
 .stash-empty {
   margin: 0;
-  padding: 12px 4px;
+  padding: 16px 8px;
   color: var(--text-mute);
-  font-size: 12.5px;
+  font-size: 13px;
   line-height: 1.6;
   text-align: center;
   border: 1px dashed var(--line-soft);
@@ -660,9 +661,9 @@ body {
 .stash-row {
   display: flex;
   flex-wrap: wrap;
-  align-items: flex-end;
-  gap: 6px;
-  padding: 6px;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px;
   border: 1px solid var(--line-soft);
   border-radius: var(--radius-sm);
   background: var(--panel-2);
@@ -675,7 +676,7 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  font-size: 11px;
+  font-size: 11.5px;
   color: var(--text-mute);
   letter-spacing: 0.5px;
   min-width: 0;
@@ -694,9 +695,9 @@ body {
   max-width: 100%;
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  padding: 3px;
-  border-radius: 6px;
+  gap: 3px;
+  padding: 5px;
+  border-radius: 7px;
   border: 1px solid var(--line);
   background: var(--panel-3);
   overflow: hidden;
@@ -704,9 +705,9 @@ body {
 }
 
 /*
- * 缩略图：136 张图里九成是正方形，而卡片框按占格变形（2×1 是 55×27.5）。
- * 用 cover 会把正方形裁成一条，用 contain 才是「整件藏品都看得见」；
- * 底色要和原图一样是深色，因为原图是透明底 PNG 转的 webp。
+ * 缩略图：136 张图里九成是正方形，而卡片框按占格变形（2×4 是 4 格宽 2 格高）。
+ * 用 contain 才是「整件藏品都看得见」；底色要和原图一样是深色，
+ * 因为原图是透明底 PNG 转的 webp。
  */
 .stash-tile .ti {
   display: block;
@@ -722,25 +723,24 @@ body {
   align-items: center;
   justify-content: center;
   color: var(--text-mute);
-  font-size: 12px;
+  font-size: 14px;
 }
 
 .stash-tile .ti[data-ph="true"]::after {
   content: "?";
 }
 
-/* 名字和价值放在图下面，不再压在图上：2×1 的卡片只有 27px 高，压上去就看不见图了 */
 .stash-tile .tv {
   color: var(--gold);
   font-family: var(--mono);
-  font-size: 10.5px;
-  line-height: 15px;
+  font-size: 11.5px;
+  line-height: 16px;
   white-space: nowrap;
 }
 
 .stash-tile .tn {
-  font-size: 10px;
-  line-height: 1.25;
+  font-size: 11.5px;
+  line-height: 1.3;
   color: var(--text);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -855,8 +855,9 @@ body {
     overflow-y: auto;
   }
 
+  /* 手机上一屏只有 390px 宽，一格的边长要跟着缩，否则一行放不下两件 */
   .stash-rows {
-    overflow-y: visible;
+    --stash-unit: 30px;
   }
 
   .panel {

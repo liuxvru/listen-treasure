@@ -94,6 +94,7 @@ try {
     const rightCol = document.querySelector("#right-col");
     const hitsPanel = document.querySelector("#hits-panel");
     const stashPanel = document.querySelector("#stash-panel");
+    const filePanel = document.querySelector("#left-col .file-panel");
     const list = document.querySelector("#hits-list");
     const cs = (n) => n ? getComputedStyle(n) : null;
     return {
@@ -104,6 +105,7 @@ try {
       rightCol: r(box("#right-col")),
       hitsPanel: r(box("#hits-panel")),
       stashPanel: r(box("#stash-panel")),
+      filePanel: r(box("#left-col .file-panel")),
       cols: getComputedStyle(document.body).gridTemplateColumns,
       leftOverflow: cs(leftCol)?.overflowY,
       rightOverflow: cs(rightCol)?.overflowY,
@@ -114,6 +116,12 @@ try {
       docScrollW: document.documentElement.scrollWidth,
       docClientW: document.documentElement.clientWidth,
       hitsIsInLeftCol: leftCol ? leftCol.contains(document.querySelector("#hits-list")) : null,
+      stashInLeftCol: leftCol && stashPanel ? leftCol.contains(stashPanel) : null,
+      hitsIsInRightCol: rightCol ? rightCol.contains(document.querySelector("#hits-panel")) : null,
+      // --stash-unit 就是「一个占格小方格的边长」，卡片宽度按它乘占格算
+      stashUnit: parseFloat(
+        getComputedStyle(document.querySelector("#stash-rows")).getPropertyValue("--stash-unit")
+      ) || 0,
       title: document.title,
       levelBars: document.querySelectorAll("#level-bars > *").length,
       deviceOptions: document.querySelectorAll("#device-select option").length,
@@ -165,18 +173,20 @@ try {
     `hits-list.left=${layout.list?.left} leftCol.right=${layout.leftCol?.right} contains=${layout.hitsIsInLeftCol}`
   );
   check(
-    "右栏自上而下：命中记录面板 → 本次藏品面板",
-    layout.hitsPanel && layout.stashPanel &&
-      layout.hitsPanel.top <= layout.stashPanel.top &&
-      layout.hitsPanel.bottom <= layout.stashPanel.top + 1,
-    `hits.top=${layout.hitsPanel?.top} hits.bottom=${layout.hitsPanel?.bottom} stash.top=${layout.stashPanel?.top}`
+    "右栏只剩命中记录（#hits-panel 占满右栏，藏品面板已挪到左栏）",
+    layout.hitsPanel && layout.rightCol && layout.stashPanel &&
+      layout.stashInLeftCol === true &&
+      layout.hitsIsInRightCol === true &&
+      layout.hitsPanel.height >= layout.rightCol.height * 0.9 &&
+      layout.listOverflow === "auto",
+    `stashInLeftCol=${layout.stashInLeftCol} hitsInRight=${layout.hitsIsInRightCol} ` +
+      `hitsPanel.h=${layout.hitsPanel?.height} rightCol.h=${layout.rightCol?.height} listOverflowY=${layout.listOverflow}`
   );
   check(
-    "命中记录面板占据右栏主要高度且列表内部滚动",
-    layout.hitsPanel && layout.rightCol &&
-      layout.hitsPanel.height >= layout.rightCol.height * 0.5 &&
-      layout.listOverflow === "auto",
-    `hitsPanel.h=${layout.hitsPanel?.height} rightCol.h=${layout.rightCol?.height} listOverflowY=${layout.listOverflow}`
+    "本次藏品面板在左栏文件识别下方，且 --stash-unit 已放大到 >= 40px",
+    layout.stashPanel && layout.filePanel && layout.stashPanel.top >= layout.filePanel.bottom - 1 &&
+      layout.stashUnit >= 40,
+    `file.bottom=${layout.filePanel?.bottom} stash.top=${layout.stashPanel?.top} --stash-unit=${layout.stashUnit}px`
   );
   check(
     "设备下拉选项数 >= 1",

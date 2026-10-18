@@ -172,7 +172,10 @@ function buildStashTile(item, index) {
   tile.dataset.name = item && item.name ? String(item.name) : "";
   tile.dataset.size = item && item.size ? String(item.size) : "";
   tile.dataset.value = String((item && item.value) || 0);
-  tile.style.width = `${44 + (slot.cols - 1) * 13}px`;
+  // 卡片按占格等比放大：占格 2×4 就是 4 格宽 2 格高，和游戏背包里看到的一致。
+  // 一格的边长由 live.css 的 --stash-unit 定（左栏 56px、窄屏 30px），
+  // 后面加的 12px 是卡片自己的左右内边距（5+5）和边框（1+1）。
+  tile.style.width = `calc(var(--stash-unit, 56px) * ${slot.cols} + 12px)`;
   tile.title = `${(item && item.name) || "藏品"} · ${(item && item.size) || "占格 1×1"} · `
     + `价值 ${formatValue((item && item.value) || 0)}`;
 

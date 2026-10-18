@@ -15,11 +15,14 @@
 | 界面 | 地址 | 布局 |
 | --- | --- | --- |
 | 图鉴页 | `/` | 左边识别、右边 17 张声音图鉴卡（换音效、查藏品） |
-| **监视台** | `/live` | 左边专心看当前判定，**命中记录在右栏**，滚上去能翻一整局的命中历史 |
+| **监视台** | `/live` | 左栏：判定 / 电平 / 文件识别 / **放大版本次藏品**；**命中记录单独占右栏**，滚上去能翻一整局的命中历史 |
 
-打游戏的时候推荐用 `/live`：命中记录单独占一栏，不会把判定结果挤出屏幕。
+打游戏的时候推荐用 `/live`：命中记录单独占一栏，不会把判定结果挤出屏幕；
+**本次藏品放在左栏（文件识别下面），卡片按真实占格等比放大**，缩略图看得清。
 
 ![监视台](docs/screenshots/live.png)
+
+![监视台左栏：按占格放大的本次藏品](docs/screenshots/live-stash.png)
 
 <p>
 <img src="docs/screenshots/mobile.png" width="300" alt="手机版">
@@ -123,6 +126,7 @@ python scripts/build_library.py          # 抓完要重建识别库（界面上�
    - **实时电平**：160 根柱子，能看到音效的包络；
    - **当前判定**：大字是命中的音效名，下面一行是 `相似度 · 置信度 · 领先幅度`，进度条是置信度；
    - **本次藏品**：按占格分组列出这件音效可能出现的全部藏品，**同一占格排一行、行内价值从高到低**，行也按面积从大到小排；
+     卡片形状按真实占格等比放大（占格 2×4 就是 4 格宽 2 格高），和游戏背包里看到的形状一致；
    - **命中记录**：每次确认一条，带时间戳和该音效对应的藏品数量，点一行可以跳到右边对应卡片。
 4. 右栏「声音图鉴」：17 张卡，每张卡是「一段音效 → 它可能对应的全部藏品」。
    - **▶ 试听** 播原音效（方便你人耳比对）；
@@ -131,7 +135,7 @@ python scripts/build_library.py          # 抓完要重建识别库（界面上�
    - 搜索框同时匹配音效名和藏品名。
 5. 手头有录音就用「文件识别」：点虚线框或拖文件进去。
 6. 嫌命中记录一直挤在左栏就跟不上判定了 → 点顶栏的 **监视台 ↗**（`/live`），
-   命中记录挪到右栏，左栏只剩当前判定、电平和藏品，打游戏时瞄一眼就够。
+   命中记录搬到右栏独占一栏，左栏留判定、电平、文件识别和**放大后的本次藏品**，打游戏时瞄一眼就够。
 
 ### 为什么是"听"而不是"读游戏内存"
 
@@ -387,7 +391,7 @@ confidence = (0.55*s + 0.45*g) * (0.75 + 0.25*s)
 | POST | `/api/recognize` | multipart `file=` → `{hits, best, alternatives, duration, frames, stats}` |
 | GET | `/api/sounds/{id}.wav` | 参考音效（试听用） |
 | GET | `/api/thumbs/{hash}.webp` | 藏品缩略图（文件名只允许十六进制字符，防路径穿越） |
-| GET | `/live` | 监视台界面（命中记录在右栏） |
+| GET | `/live` | 监视台界面（命中记录独占右栏，左栏放放大版本次藏品） |
 | GET | `/m` | 手机版界面 |
 | GET | `/api/net` | `{port, primaryIp, lanIps, mobileUrls, mobileUrl, loopbackOnly}` |
 | GET | `/api/qr.svg` | 二维码（SVG），`?url=` 可覆盖默认的手机端地址 |
@@ -397,7 +401,7 @@ confidence = (0.55*s + 0.45*g) * (0.75 + 0.25*s)
 
 上传上限 64 MB，允许的扩展名：`wav mp3 ogg oga flac m4a aac aiff aif wma`。
 
-### 六个采集/推送/前端侧的坑（写在这里免得以后重新查）
+### 七个采集/推送/前端侧的坑（写在这里免得以后重新查）
 
 1. **WASAPI 回环在静音时完全不产生数据**。`AudioCapture.read()` 直接超时返回 `None`，
    识别线程必须按真实时间补静音（`meter.fill(...)`），否则电平表会永远停在最后一次声音的画面上。
@@ -428,6 +432,15 @@ confidence = (0.55*s + 0.45*g) * (0.75 + 0.25*s)
    那是 `library.json` 的裸数据，只有四个键（`name` / `value` / `size` / `img`），
    `thumbUrl` 是 `/api/library` 的 `_library_item_json()` 动态补的，拿 `img`（裸 hash）
    当 URL 会请求到站点根路径，全部 404。
+7. **藏品卡要用「一个占格的边长」当单位放大，别写死固定像素**。监视台最初把「本次藏品」
+   塞在 400 px 宽的右栏里，卡片宽度是 `44 + (cols - 1) * 13` 像素——最大的 2×4 也只有 83 px，
+   缩略图糊成一团（用户的原话是「看不太清楚」）。现在面板搬到左栏（文件识别下面），
+   尺寸交给 CSS 变量：`.stash-rows { --stash-unit: 56px }`，JS 只写
+   `width: calc(var(--stash-unit) * cols + 12px)`（12 = 内边距 5+5 + 边框 1+1），
+   于是 2×4 是 236 px 宽、3×2 是 124×217，**和游戏背包里的形状比例一致**。
+   窄屏（`max-width: 899px`）只改 `--stash-unit: 30px` 就整体缩下去，
+   不用为每种占格各写一套响应式宽度。动这块记得跑 `tests/live_page_e2e.mjs`，
+   它有一条断言盯着 `--stash-unit >= 40px` 和「藏品面板在文件识别下方」。
 
 ---
 
@@ -445,7 +458,7 @@ listen_treasure/
   netinfo.py      局域网 IP 探测 + 二维码（SVG / PNG / 终端字符）
   server.py       FastAPI 端点 + SSE
   ui/             index.html + styles.css + app.js（原生 ES module，无构建）
-    live.html     live.css   live.js           监视台（命中记录在右栏）
+    live.html     live.css   live.js           监视台（命中记录在右栏、藏品在左栏放大）
     mobile.html   mobile.css   mobile.js       手机版界面
 scripts/
   run.py          启动入口（--host/--lan/--port/--no-browser/--no-qr/--rebuild）
@@ -455,7 +468,7 @@ scripts/
 tests/
   cdp.mjs         自建的 CDP 客户端（只用 Node 内置 WebSocket，不装 puppeteer）
   ui2.mjs         桌面版 UI 全流程 21 项
-  live_page_e2e.mjs  监视台 UI 全流程 32 项（命中记录在右栏）
+  live_page_e2e.mjs  监视台 UI 全流程 32 项（命中记录在右栏、藏品卡放大）
   mobile_e2e.mjs  手机版 UI 全流程 19 项（390×844 视口 + 触摸模拟）
   lan_e2e.mjs     用真实局域网 IP 打开手机版 9 项（局域网 IP 自动探测，没有就跳过）
   sync_e2e.mjs    同步图鉴按钮 + 二维码面板 7 项
@@ -492,7 +505,7 @@ python scripts/bench.py all        # 全场景自检（约 30 秒）
 python scripts/bench.py self       # 只跑自识别
 python tests/live_e2e.py           # 真实回环 + 无头浏览器端到端（需要先起服务）
 node tests/ui2.mjs                 # 桌面版 UI 全流程 21 项
-node tests/live_page_e2e.mjs       # 监视台 UI 全流程 32 项
+node tests/live_page_e2e.mjs       # 监视台 UI 全流程 32 项（含藏品卡尺寸断言）
 node tests/mobile_e2e.mjs          # 手机版 UI 全流程 19 项
 node tests/lan_e2e.mjs             # 局域网 IP 访问手机版 9 项
 node tests/sync_e2e.mjs            # 同步图鉴按钮 + 二维码 7 项

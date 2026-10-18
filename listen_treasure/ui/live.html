@@ -91,9 +91,22 @@
           hidden
         />
       </section>
+
+      <!-- 本次藏品：放在文件识别下面，占满左栏宽度，缩略图才看得清 -->
+      <section class="panel stash-panel" id="stash-panel" data-has="false">
+        <div class="panel-head">
+          <h2>本次藏品</h2>
+          <span class="panel-hint" id="stash-hint">等待识别</span>
+        </div>
+        <div class="stash-rows" id="stash-rows">
+          <p class="stash-empty" id="stash-empty">
+            识别到音效后，这里按占格分组列出藏品：同一占格的排一行，行内价值从高到低。
+          </p>
+        </div>
+      </section>
     </div>
 
-    <!-- ============ 右栏：命中记录（上）+ 本次藏品（下） ============ -->
+    <!-- ============ 右栏：命中记录 ============ -->
     <div class="live-col live-right" id="right-col">
       <section class="panel hits-panel" id="hits-panel">
         <div class="panel-head">
@@ -105,18 +118,6 @@
         <ul class="hits-list" id="hits-list">
           <li class="hits-empty" id="hits-empty">还没有命中…</li>
         </ul>
-      </section>
-
-      <section class="panel stash-panel" id="stash-panel" data-has="false">
-        <div class="panel-head">
-          <h2>本次藏品</h2>
-          <span class="panel-hint" id="stash-hint">等待识别</span>
-        </div>
-        <div class="stash-rows" id="stash-rows">
-          <p class="stash-empty" id="stash-empty">
-            识别到音效后，这里按占格分组列出藏品：同一占格的排一行，行内价值从高到低。
-          </p>
-        </div>
       </section>
     </div>
 
