@@ -2,6 +2,8 @@
    左栏 = 实时识别，右栏 = 命中记录 + 本次藏品 */
 
 :root {
+  /* 声明深色配色，否则 Chrome 的滚动条/下拉框会套浅色默认皮肤（横向滚动的藏品行会出现白条） */
+  color-scheme: dark;
   --bg: #0b0f0d;
   --panel: #141b18;
   --panel-2: #1a2320;
@@ -690,6 +692,10 @@ body {
   position: relative;
   flex: 0 0 auto;
   max-width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 3px;
   border-radius: 6px;
   border: 1px solid var(--line);
   background: var(--panel-3);
@@ -697,32 +703,34 @@ body {
   cursor: default;
 }
 
+/*
+ * 缩略图：136 张图里九成是正方形，而卡片框按占格变形（2×1 是 55×27.5）。
+ * 用 cover 会把正方形裁成一条，用 contain 才是「整件藏品都看得见」；
+ * 底色要和原图一样是深色，因为原图是透明底 PNG 转的 webp。
+ */
 .stash-tile .ti {
   display: block;
   width: 100%;
-  background-size: cover;
+  background-color: #0e1411;
+  background-size: contain;
   background-position: center;
-  background-color: var(--panel-3);
+  background-repeat: no-repeat;
 }
 
-.stash-tile .ti[data-ph="true"]::after {
-  content: "?";
+.stash-tile .ti[data-ph="true"] {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 100%;
-  height: 100%;
   color: var(--text-mute);
   font-size: 12px;
 }
 
+.stash-tile .ti[data-ph="true"]::after {
+  content: "?";
+}
+
+/* 名字和价值放在图下面，不再压在图上：2×1 的卡片只有 27px 高，压上去就看不见图了 */
 .stash-tile .tv {
-  position: absolute;
-  right: 3px;
-  bottom: 2px;
-  padding: 0 4px;
-  border-radius: 4px;
-  background: rgba(11, 15, 13, 0.82);
   color: var(--gold);
   font-family: var(--mono);
   font-size: 10.5px;
@@ -731,21 +739,16 @@ body {
 }
 
 .stash-tile .tn {
-  position: absolute;
-  inset: 0;
-  padding: 3px 4px;
   font-size: 10px;
   line-height: 1.25;
   color: var(--text);
-  background: rgba(11, 15, 13, 0.72);
-  opacity: 0;
-  transition: opacity 0.15s ease;
   overflow: hidden;
-  overflow-wrap: anywhere;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.stash-tile:hover .tn {
-  opacity: 1;
+.stash-tile:hover {
+  border-color: rgba(82, 196, 26, 0.45);
 }
 
 /* ==================== toast ==================== */

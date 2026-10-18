@@ -185,50 +185,57 @@ function renderVerdict(verdict, force) {
 
 // ---------------------------------------------------------------- 本次藏品
 
-/** 「占格 2×3」→ {w:2,h:3}；解析不出来当 1×1 */
+/**
+ * 「占格 2×3」→ 2 行 3 列；解析不出来当 1×1。
+ * 站点是「行×列」，第一个数字是高度、第二个才是宽度（原图可证：占格 1×3 的
+ * 「非线性探测器」是 745×261 的宽图）。w/h 保留旧含义给分组排序用，
+ * 算几何一律用 cols/rows。
+ */
 function parseSlots(size) {
   const m = SIZE_RE.exec(String(size || ""));
-  if (!m) return { w: 1, h: 1 };
-  return { w: Math.max(1, Number(m[1]) || 1), h: Math.max(1, Number(m[2]) || 1) };
+  if (!m) return { rows: 1, cols: 1, w: 1, h: 1 };
+  const rows = Math.max(1, Number(m[1]) || 1);
+  const cols = Math.max(1, Number(m[2]) || 1);
+  return { rows, cols, w: rows, h: cols };
 }
 
 /** 按占格分组：同占格一行，行内价值降序；行按面积从大到小 */
 function groupStash(items) {
   const groups = new Map();
   for (const item of items) {
-    const { w, h } = parseSlots(item.size);
-    const key = `${w}×${h}`;
+    const { rows, cols } = parseSlots(item.size);
+    const key = `${rows}×${cols}`;
     let g = groups.get(key);
     if (!g) {
-      g = { key, w, h, area: w * h, items: [] };
+      g = { key, rows, cols, area: rows * cols, items: [] };
       groups.set(key, g);
     }
     g.items.push(item);
   }
-  const rows = [...groups.values()];
-  for (const row of rows) {
+  const list = [...groups.values()];
+  for (const row of list) {
     row.items.sort((a, b) => (Number(b.value) || 0) - (Number(a.value) || 0));
   }
-  rows.sort((a, b) => b.area - a.area || b.w - a.w || b.h - a.h);
-  return rows;
+  list.sort((a, b) => b.area - a.area || b.cols - a.cols || b.rows - a.rows);
+  return list;
 }
 
 function buildStashTile(item, index) {
-  const { w, h } = parseSlots(item.size);
+  const { rows, cols } = parseSlots(item.size);
   const tile = el("div", "stash-tile");
-  // 占格越大卡片越宽，缩略图框按 w:h 变形，一眼看出 3×2 和 1×1 的差别
-  tile.style.width = `${44 + (w - 1) * 13}px`;
+  // 占格越宽卡片越宽，缩略图框按 列:行 变形，一眼看出 3×2 和 1×1 的差别
+  tile.style.width = `${44 + (cols - 1) * 13}px`;
   // 刻意不做逐个延迟入场：手机上这屏是「打游戏瞄一眼」用的，
   // 错开动画会让下面几行有半秒钟是空的（第一版按 index*22ms 延迟，实测就是这样）。
   void index;
   tile.title = `${item.name} · ${item.size || "占格 1×1"} · ${formatValue(item.value)}`;
   // 留给自测/调试读：真实数值比格式化后的「100W」好断言
   tile.dataset.name = item.name;
-  tile.dataset.size = `${w}×${h}`;
+  tile.dataset.size = `${rows}×${cols}`;
   tile.dataset.value = String(Number(item.value) || 0);
 
   const pic = el("div", "ti");
-  pic.style.aspectRatio = `${w} / ${h}`;
+  pic.style.aspectRatio = `${cols} / ${rows}`;
   if (item.thumbUrl) pic.style.backgroundImage = `url("${item.thumbUrl}")`;
   else pic.classList.add("placeholder");
 

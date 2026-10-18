@@ -61,14 +61,20 @@ function formatElapsed(sec) {
   return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
 }
 
-function formatValue(min, max) {
-  const a = Number(min);
-  const b = Number(max);
-  if (!Number.isFinite(a) && !Number.isFinite(b)) return "";
-  if (Number.isFinite(a) && Number.isFinite(b)) {
-    return a === b ? `${Math.round(a)}` : `${Math.round(a)}–${Math.round(b)}`;
+/**
+ * 价值文本。和 app.js / mobile.js 用同一套紧凑写法：
+ * 一万以上换成「万」并压成 160W / 25.5W / 2.33W，一万以下用千分位。
+ * 右栏卡片只有 42~68px 宽，直接印 1600000 会顶满整张卡。
+ */
+function formatValue(v) {
+  const n = Number(v) || 0;
+  if (n >= 10000) {
+    const w = n / 10000;
+    if (w >= 100) return `${Math.round(w)}W`;
+    if (w >= 10) return `${w.toFixed(1).replace(/\.0$/, "")}W`;
+    return `${w.toFixed(2).replace(/0$/, "").replace(/\.$/, "")}W`;
   }
-  return `${Math.round(Number.isFinite(a) ? a : b)}`;
+  return n.toLocaleString("zh-CN");
 }
 
 function setConn(text, kind) {
@@ -110,17 +116,22 @@ function postJSON(url, body) {
 
 /* ============================== 藏品分组 ============================== */
 
+/**
+ * 「占格 2×3」→ 2 行 3 列。
+ * 站点写的是「行×列」，第一个数字是高度、第二个才是宽度（原图可证：
+ * 占格 1×3 的「非线性探测器」是 745×261 的宽图）。
+ * w/h 保留旧含义供分组排序，凡是算几何一律用 cols/rows。
+ */
 function parseSlots(size) {
   const m = SIZE_RE.exec(String(size || ""));
   if (!m) return null;
-  const w = Number(m[1]);
-  const h = Number(m[2]);
-  if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) return null;
-  return { w, h };
+  const rows = Math.max(1, Number(m[1]) || 1);
+  const cols = Math.max(1, Number(m[2]) || 1);
+  return { rows, cols, w: rows, h: cols };
 }
 
 /**
- * 同一占格排一行；行内价值从高到低；行本身按面积（再按格数）从大到小。
+ * 同一占格排一行；行内价值从高到低；行本身按面积（再按宽度）从大到小。
  */
 function groupStash(items) {
   const rows = new Map();
@@ -132,15 +143,15 @@ function groupStash(items) {
       loose.push(item);
       continue;
     }
-    const key = `${slot.w}x${slot.h}`;
-    if (!rows.has(key)) rows.set(key, { key, w: slot.w, h: slot.h, items: [] });
+    const key = `${slot.rows}x${slot.cols}`;
+    if (!rows.has(key)) rows.set(key, { key, rows: slot.rows, cols: slot.cols, items: [] });
     rows.get(key).items.push(item);
   }
 
   const list = [...rows.values()].sort((a, b) => {
-    const area = b.w * b.h - a.w * a.h;
+    const area = b.rows * b.cols - a.rows * a.cols;
     if (area !== 0) return area;
-    return b.h - a.h || b.w - a.w;
+    return b.cols - a.cols || b.rows - a.rows;
   });
 
   for (const row of list) {
@@ -149,26 +160,31 @@ function groupStash(items) {
 
   if (loose.length) {
     loose.sort((a, b) => Number(b.value || 0) - Number(a.value || 0));
-    list.push({ key: "loose", w: 0, h: 0, items: loose, loose: true });
+    list.push({ key: "loose", rows: 0, cols: 0, items: loose, loose: true });
   }
   return list;
 }
 
 function buildStashTile(item, index) {
-  const slot = parseSlots(item && item.size) || { w: 1, h: 1 };
+  const slot = parseSlots(item && item.size) || { rows: 1, cols: 1 };
   const tile = document.createElement("div");
   tile.className = "stash-tile";
   tile.dataset.name = item && item.name ? String(item.name) : "";
   tile.dataset.size = item && item.size ? String(item.size) : "";
   tile.dataset.value = String((item && item.value) || 0);
-  tile.style.width = `${44 + (slot.w - 1) * 13}px`;
+  tile.style.width = `${44 + (slot.cols - 1) * 13}px`;
+  tile.title = `${(item && item.name) || "藏品"} · ${(item && item.size) || "占格 1×1"} · `
+    + `价值 ${formatValue((item && item.value) || 0)}`;
 
   const thumb = document.createElement("div");
   thumb.className = "ti";
-  thumb.style.aspectRatio = `${slot.w} / ${slot.h}`;
-  const src = item && (item.thumbUrl || item.img);
+  // 站点是「行×列」，长宽比要用 列/行
+  thumb.style.aspectRatio = `${slot.cols} / ${slot.rows}`;
+  // 只有后端拼好的 /api/thumbs/xxx.webp 才是真地址；item.img 是裸的 16 进制 id，
+  // 拿来当 URL 会请求站点根路径（/f746be45…），必然 404 而且整张卡一片空白。
+  const src = item && typeof item.thumbUrl === "string" && item.thumbUrl ? item.thumbUrl : "";
   if (src) {
-    thumb.style.backgroundImage = `url("${String(src).replace(/"/g, "%22")}")`;
+    thumb.style.backgroundImage = `url("${src.replace(/"/g, "%22")}")`;
   } else {
     thumb.dataset.ph = "true";
   }
@@ -179,17 +195,25 @@ function buildStashTile(item, index) {
 
   const value = document.createElement("div");
   value.className = "tv";
-  value.textContent = formatValue(item && item.value, item && item.value);
+  value.textContent = formatValue(item && item.value);
 
   tile.append(thumb, name, value);
   return tile;
 }
 
+/**
+ * 找出这次判定对应的图鉴条目。
+ * 优先用 /api/library 里的条目 —— 只有它带后端拼好的 thumbUrl；
+ * verdict.item 是 /api/recognize 的原样输出，codexItems 里没有 thumbUrl，
+ * 直接拿来渲染会让所有缩略图 404。库还没加载好时才退回它。
+ */
 function resolveItem(verdict) {
   if (!verdict) return null;
-  if (verdict.item && typeof verdict.item === "object") return verdict.item;
   const id = verdict.id == null ? "" : String(verdict.id);
-  return state.byId.get(id) || null;
+  const fromLib = id ? state.byId.get(id) : null;
+  if (fromLib) return fromLib;
+  if (verdict.item && typeof verdict.item === "object") return verdict.item;
+  return null;
 }
 
 function renderStash(verdict, force = false) {
@@ -221,7 +245,7 @@ function renderStash(verdict, force = false) {
     const head = document.createElement("div");
     head.className = "stash-row-head";
     const label = document.createElement("span");
-    label.textContent = row.loose ? "未标注占格" : `占格 ${row.w}×${row.h}`;
+    label.textContent = row.loose ? "未标注占格" : `占格 ${row.rows}×${row.cols}`;
     const count = document.createElement("span");
     count.textContent = `${row.items.length} 件`;
     head.append(label, count);

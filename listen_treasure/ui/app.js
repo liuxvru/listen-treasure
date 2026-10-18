@@ -1041,57 +1041,63 @@ function renderVerdict(verdict) {
 
 /* ================= 本次藏品：按占格分组，同占格一行，行内价值降序 ================= */
 
-// 站点给的格式是「占格 3×2」，也见过 x / * 两种写法，全部兼容
+// 站点给的格式是「占格 2×3」，写的是「行×列」，也见过 x / * 两种写法，全部兼容
 const SIZE_RE = /占格\s*(\d+)\s*[x×*]\s*(\d+)/;
 
-/** 「占格 2×3」→ {w:2,h:3}；解析不出来就当 1×1 */
+/**
+ * 「占格 2×3」→ 2 行 3 列。
+ * 注意站点是「行×列」，所以第一个数字是**高度**、第二个才是**宽度**：
+ * 原图能验证这点（占格 1×3 的「非线性探测器」是 745×261 的宽图）。
+ * w/h 故意保留旧含义（= 原始顺序），分组、排序、dataset.size 都靠它，别动；
+ * 凡是算几何（卡片宽度、缩略图长宽比）一律用 cols/rows。
+ */
 function parseSlots(size) {
   const m = SIZE_RE.exec(String(size || ""));
-  if (!m) return { w: 1, h: 1 };
-  return {
-    w: Math.max(1, Number(m[1]) || 1),
-    h: Math.max(1, Number(m[2]) || 1),
-  };
+  if (!m) return { rows: 1, cols: 1, w: 1, h: 1 };
+  const rows = Math.max(1, Number(m[1]) || 1);
+  const cols = Math.max(1, Number(m[2]) || 1);
+  return { rows, cols, w: rows, h: cols };
 }
 
 /**
  * 按占格分组：同一占格的一行，行内按价值从高到低。
- * 行的顺序按「面积大 → 面积小、宽 → 窄」排，大件在最上面。
+ * 行的顺序按「面积大 → 面积小、宽的优先、高的靠后」排，大件在最上面。
  */
 function groupStash(items) {
   const groups = new Map();
   for (const item of items) {
-    const { w, h } = parseSlots(item.size);
-    const key = `${w}×${h}`;
+    const { rows, cols } = parseSlots(item.size);
+    const key = `${rows}×${cols}`;
     let g = groups.get(key);
     if (!g) {
-      g = { key, w, h, area: w * h, items: [] };
+      g = { key, rows, cols, area: rows * cols, items: [] };
       groups.set(key, g);
     }
     g.items.push(item);
   }
-  const rows = [...groups.values()];
-  for (const row of rows) {
+  const list = [...groups.values()];
+  for (const row of list) {
     row.items.sort((a, b) => (Number(b.value) || 0) - (Number(a.value) || 0));
   }
-  rows.sort((a, b) => b.area - a.area || b.w - a.w || b.h - a.h);
-  return rows;
+  list.sort((a, b) => b.area - a.area || b.cols - a.cols || b.rows - a.rows);
+  return list;
 }
 
 function buildStashTile(item, index) {
-  const { w, h } = parseSlots(item.size);
+  const { rows, cols } = parseSlots(item.size);
   const tile = el("div", "stash-tile");
-  // 占格越大，卡片越宽；缩略图框按 w:h 变形，一眼能看出 3×2 和 1×1 的差别
-  tile.style.width = `${54 + (w - 1) * 17}px`;
+  // 占格越宽，卡片越宽；缩略图框按 列:行 变形，一眼能看出 3×2 和 1×1 的差别
+  tile.style.width = `${54 + (cols - 1) * 17}px`;
   tile.style.animationDelay = `${Math.min(index, 10) * 22}ms`;
   tile.title = `${item.name} · ${item.size || "占格 1×1"} · 价值 ${formatValue(item.value)}`;
   // 留给自测/调试读：真实数值比格式化后的「100W」好断言
   tile.dataset.name = item.name;
-  tile.dataset.size = `${w}×${h}`;
+  tile.dataset.size = `${rows}×${cols}`;
   tile.dataset.value = String(Number(item.value) || 0);
 
   const pic = el("div", "ti");
-  pic.style.aspectRatio = `${w} / ${h}`;
+  // 站点说「占格 行×列」，所以长宽比是 列/行
+  pic.style.aspectRatio = `${cols} / ${rows}`;
   if (item.thumbUrl) pic.style.backgroundImage = `url("${item.thumbUrl}")`;
   else pic.classList.add("placeholder");
 

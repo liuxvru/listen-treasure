@@ -19,6 +19,8 @@
 
 打游戏的时候推荐用 `/live`：命中记录单独占一栏，不会把判定结果挤出屏幕。
 
+![监视台](docs/screenshots/live.png)
+
 <p>
 <img src="docs/screenshots/mobile.png" width="300" alt="手机版">
 <img src="docs/screenshots/stash.png" width="470" alt="按占格分组的藏品面板">
@@ -395,7 +397,7 @@ confidence = (0.55*s + 0.45*g) * (0.75 + 0.25*s)
 
 上传上限 64 MB，允许的扩展名：`wav mp3 ogg oga flac m4a aac aiff aif wma`。
 
-### 五个采集/推送/前端侧的坑（写在这里免得以后重新查）
+### 六个采集/推送/前端侧的坑（写在这里免得以后重新查）
 
 1. **WASAPI 回环在静音时完全不产生数据**。`AudioCapture.read()` 直接超时返回 `None`，
    识别线程必须按真实时间补静音（`meter.fill(...)`），否则电平表会永远停在最后一次声音的画面上。
@@ -416,6 +418,16 @@ confidence = (0.55*s + 0.45*g) * (0.75 + 0.25*s)
    否则会出现两种怪现象：刚打开页面就显示上一场游戏的判定（看着像刚认出来的）；
    刚手动上传文件识别完，下一秒又被残值盖回去。手动识别时置 `state.verdictManual = true`，
    实时收到 `hit` 或重新开始监听时清掉。"停止后画面保留"这条不受影响——正是不渲染，已有结果才留得住。
+6. **占格是「行×列」，第一个数字是高度**。站点返回 `gridRows=2, gridCols=4`，
+   前端一直按「宽×高」在算卡片宽度和缩略图的 `aspect-ratio`，于是每种占格都转置了
+   （`占格 2×4` 被渲染成又高又窄的竖条，正好和它该有的样子相差 90°）。用原图能反证：
+   站点标 `占格 1×3` 的「非线性探测器」原图是 745×261 的宽图。另外两处配套的坑：
+   卡片缩略图必须 `background-size: contain`
+   （136 张原图九成是正方形且带透明通道，用 `cover` 放进扁框里会只剩中间一条）；
+   藏品列表**不能用 `/api/recognize` 返回的 `codexItems` 去取 `thumbUrl`**——
+   那是 `library.json` 的裸数据，只有四个键（`name` / `value` / `size` / `img`），
+   `thumbUrl` 是 `/api/library` 的 `_library_item_json()` 动态补的，拿 `img`（裸 hash）
+   当 URL 会请求到站点根路径，全部 404。
 
 ---
 
@@ -457,7 +469,7 @@ tools/            早期的一次性抓取工具（Node，已被 crawler.py 取�
   scrape-codex.mjs      从站点 DOM 抓「音效 → 藏品」对照表
   fetch-item-images.mjs 下载藏品原图（早期发现 curl 直连 403，得在页面里 fetch）
   make-thumbs.mjs       用 canvas 把原图压成 128px webp
-docs/screenshots/ 桌面版 / 手机版 / 藏品面板的截图
+docs/screenshots/ 图鉴页 / 监视台 / 手机版 / 藏品面板的截图
 data/             （不进仓库，首次运行自动抓）
   library.json    17 段音效 / 341 张模板 / 138 件藏品（dim 1536）
   sounds/1..17.wav  参考音效（48 kHz 立体声，0.235 – 0.853 s）
