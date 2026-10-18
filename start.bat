@@ -55,7 +55,7 @@ if not defined PY (
     "%ProgramFiles%\Python313\python.exe"
     "%ProgramFiles%\Python312\python.exe"
     "%ProgramFiles%\Python311\python.exe"
-    "%USERPROFILE%\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\python\python.exe"
+    "%ProgramFiles%\Python310\python.exe"
   ) do (
     if not defined PY (
       if exist "%%~D" (
