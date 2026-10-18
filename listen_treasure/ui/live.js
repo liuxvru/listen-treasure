@@ -410,7 +410,10 @@ function applyStatus(status) {
   renderLevel(status.meter);
 
   const counter = el("verdict-count");
-  if (counter) {
+  if (counter && status.running) {
+    // 只在监听中采纳 confirmations：没在监听时后端保留的是上一轮的数字，
+    // 页面刚打开时拿它来显示会出现「累计 17 次」而下面是空的命中记录。
+    // 停止后不动它，画面保留上一次显示的值，不会跳回 0。
     const n = Number(status.confirmations);
     counter.textContent = `累计 ${Number.isFinite(n) && n > 0 ? Math.floor(n) : 0} 次`;
   }
@@ -440,9 +443,13 @@ function applyStatus(status) {
     state.lastError = "";
   }
 
-  // 停止监听后后端仍保留 lastVerdict，别拿残值覆盖手动文件识别的结果
-  if (!status.running && state.verdictManual) return;
-  renderVerdict(status.lastVerdict);
+  // 没在监听时 lastVerdict 只是「上一轮留下的残值」，不能主动画到屏幕上：
+  // · 页面刚打开时它会显示上一场游戏的判定，看着像刚认出来的；
+  // · 用户刚上传文件手动识别完，它又会把结果盖回去。
+  // 停止监听时正是不渲染，屏幕上已有的结果才会自然保留下来。
+  if (status.running && !state.verdictManual) {
+    renderVerdict(status.lastVerdict);
+  }
 }
 
 /* ============================== SSE ============================== */

@@ -48,7 +48,10 @@ const state = {
   meterEls: [],
   flashTimers: new Map(),
   errorBars: [], // 当前显示的错误条（最多 4 条）
-  stashId: null, // 3×3 藏品面板当前渲染的音效 id（null = 还没画过；避免 SSE 每 250ms 重画）
+  stashId: null, // 藏品面板当前渲染的音效 id（null = 还没画过；避免 SSE 每 250ms 重画）
+  // 手动文件识别出的结果不该被后端残留的 lastVerdict 覆盖：停止监听后
+  // lastVerdict 仍然留着上一轮的值，SSE 每 250ms 都会推过来。
+  verdictManual: false,
   sync: { busy: false }, // 正在从站点抓数据
   net: null, // 后端给的局域网信息（手机端二维码用）
 };
@@ -797,6 +800,8 @@ async function startLive() {
   try {
     const status = await postJSON(API.liveStart, { deviceIndex: state.deviceIndex });
     state.live.running = true;
+    // 开了新一轮监听，之前手动识别的结果就该让位给实时判定
+    state.verdictManual = false;
     renderStatus(status);
     // 新一轮监听，3×3 藏品面板清空（停止时是保留，两处语义不同）
     renderStash(null, true);
@@ -833,6 +838,7 @@ async function stopLive() {
   } finally {
     state.live.running = false;
     state.live.busy = false;
+    state.verdictManual = false;
     setLiveButton("idle", "开始监听");
     setStatus("就绪", "ok");
     resetLiveUI();
@@ -916,7 +922,10 @@ function removeReconnectBar() {
 function handleEvent(msg) {
   if (!msg || typeof msg !== "object") return;
   if (msg.type === "hit" && msg.hit) {
+    // 实时命中了：说明用户回到了监听场景，手动识别的结果可以让位
+    state.verdictManual = false;
     addHit(msg.hit);
+    renderVerdict(msg.hit);
   } else if (msg.type === "status" && msg.status) {
     renderStatus(msg.status);
   }
@@ -929,7 +938,10 @@ function renderStatus(status) {
   if (!status) return;
   state.live.running = !!status.running;
   state.live.elapsed = Number(status.elapsed) || 0;
-  state.live.confirmations = Number(status.confirmations) || 0;
+  // 只在监听中采纳后端计数：没在监听时它保留的是上一轮的数字，
+  // 页面刚打开就拿它来显示会变成「累计 17 次」而命中记录是空的。
+  // 停止后不动它，屏幕上保留本轮最后的数字，不会跳回 0。
+  if (status.running) state.live.confirmations = Number(status.confirmations) || 0;
 
   if (!state.live.busy) {
     setLiveButton(status.running ? "running" : "idle", status.running ? "停止监听" : "开始监听");
@@ -946,7 +958,13 @@ function renderStatus(status) {
   updateVerdictCount();
 
   renderMeter(status.meter);
-  renderVerdict(status.lastVerdict);
+  // 没在监听时 lastVerdict 只是「上一轮留下的残值」，不能主动画到屏幕上：
+  // · 页面刚打开时它会显示上一场游戏的判定，看着像刚认出来的；
+  // · 用户刚上传文件手动识别完，它又会把结果盖回去。
+  // 停止监听时正是不渲染，屏幕上已有的结果才会自然保留下来。
+  if (status.running && !state.verdictManual) {
+    renderVerdict(status.lastVerdict);
+  }
 
   if (status.error) {
     showError(`采集异常：${status.error}`, { warn: true, timeout: 12000 });
@@ -1263,9 +1281,12 @@ async function recognizeFile(file) {
       toast(`识别完成：命中 ${hits.length} 次`);
     }
     // 文件识别的结果同样回填到「当前判定」，否则用户拖完文件后大字区域还是「等待声音…」
-    renderVerdict(res.best && res.best.id ? res.best : null);
+    const best = res.best && res.best.id ? res.best : null;
+    // 手动识别优先：打个标记，防止后端残留的 lastVerdict 把结果盖回去
+    if (best) state.verdictManual = true;
+    renderVerdict(best);
     if (hits.length) bumpVerdictCount(hits.length);
-    if (res.best && res.best.id) focusCard(res.best.id);
+    if (best) focusCard(best.id);
     setTimeout(() => {
       if (progress) progress.hidden = true;
     }, 2200);

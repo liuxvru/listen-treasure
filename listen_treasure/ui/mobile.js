@@ -40,6 +40,10 @@ const state = {
   levelEls: [],
   toastTimer: null,
   verdictId: null,
+  // 手动文件识别出的结果不该被后端残留的 lastVerdict 覆盖：
+  // 停止监听后 lastVerdict 仍然留着上一轮的值，SSE 每 250ms 都会推过来，
+  // 不给这个开关的话，用户刚上传完文件、下一秒大字就被换回上一场的音效。
+  verdictManual: false,
 };
 
 const $ = (sel, root) => (root || document).querySelector(sel);
@@ -176,7 +180,7 @@ function renderVerdict(verdict, force) {
   const gap = Number(verdict.gap) || 0;
   facts.textContent = `相似度 ${score.toFixed(2)} · 置信度 ${conf.toFixed(2)} · 领先 ${gap.toFixed(2)}`;
   if (fill) fill.style.width = `${clamp01(conf) * 100}%`;
-  renderStash(verdict);
+  renderStash(verdict, force);
 }
 
 // ---------------------------------------------------------------- 本次藏品
@@ -246,8 +250,7 @@ function renderStash(verdict, force) {
   }
   // 清空是唯一「真的没有藏品」的时机，此时要连 stashId 一起清掉，
   // 否则开始新一轮监听后同一个音效会被上面的去重逻辑挡住不重画。
-  if (force) state.stashId = id;
-  else state.stashId = id;
+  state.stashId = id;
 
   clear(box);
   const item = id ? state.byId.get(id) : null;
@@ -347,7 +350,10 @@ function renderStatus(status) {
   if (!status) return;
   state.live.running = Boolean(status.running);
   state.live.elapsed = Number(status.elapsed) || 0;
-  state.live.confirmations = Number(status.confirmations) || 0;
+  // 只在监听中采纳后端计数：没在监听时它保留的是上一轮的数字，
+  // 手机刚打开页面就拿它来显示会变成「累计 17 次」而命中记录是空的。
+  // 停止后不动它，屏幕上保留本轮最后的数字，不会跳回 0。
+  if (state.live.running) state.live.confirmations = Number(status.confirmations) || 0;
 
   setLiveButton(state.live.running ? "running" : "idle", state.live.running ? "停止监听" : "开始监听");
   const elapsed = $("#live-elapsed");
@@ -358,7 +364,13 @@ function renderStatus(status) {
   }
   updateVerdictCount();
   renderLevel(status.meter || null);
-  renderVerdict(status.lastVerdict || null);
+  // 没在监听时 lastVerdict 只是「上一轮留下的残值」，不能主动画到屏幕上：
+  // · 页面刚打开时它会显示上一场游戏的判定，看着像刚认出来的；
+  // · 用户刚上传文件手动识别完，它又会把结果盖回去。
+  // 停止监听时正是不渲染，屏幕上已有的结果才会自然保留下来。
+  if (state.live.running && !state.verdictManual) {
+    renderVerdict(status.lastVerdict || null);
+  }
   if (status.error) toast(status.error, "err");
 }
 
@@ -450,7 +462,12 @@ function openEvents() {
     }
     if (!msg || typeof msg !== "object") return;
     if (msg.type === "status") renderStatus(msg.status);
-    else if (msg.type === "hit") addHit(msg.hit);
+    else if (msg.type === "hit") {
+      // 实时命中了：说明用户回到了监听场景，手动识别的结果可以让位
+      state.verdictManual = false;
+      addHit(msg.hit);
+      renderVerdict(msg.hit, true);
+    }
   });
   es.addEventListener("error", () => {
     // EventSource 自己会按 retry: 2000 重连，这里只更新 UI 状态
@@ -554,6 +571,8 @@ async function startLive() {
   try {
     const body = { deviceIndex: state.deviceIndex };
     const status = await postJSON(API.liveStart, body);
+    // 开了新一轮监听，之前手动识别的结果就该让位给实时判定
+    state.verdictManual = false;
     renderStatus(status);
     openEvents();
     toast("开始监听", "ok");
@@ -579,6 +598,7 @@ async function stopLive() {
     }
     updateVerdictCount();
     state.live.running = false;
+    state.verdictManual = false;
     setLiveButton("idle", "开始监听");
     const device = $("#live-device");
     if (device) device.textContent = "未开始";
@@ -610,8 +630,9 @@ async function recognizeFile(file) {
     updateVerdictCount();
     const best = res && res.best;
     if (best && best.id != null) {
-      state.verdictId = null; // 强制重画（同一段音效也可能再识别一次）
-      renderVerdict(best);
+      // 手动识别优先：打个标记，防止后端残留的 lastVerdict 把结果盖回去
+      state.verdictManual = true;
+      renderVerdict(best, true);
       toast(`识别到 ${best.name || best.id}`, "ok");
     } else {
       toast("没听出是什么音效", "err");
