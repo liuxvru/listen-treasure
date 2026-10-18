@@ -190,8 +190,18 @@ class LiveRecognizer:
     """实时识别：后台线程吃 PCM，产出判定与统计。
 
     识别线程与采集线程用 queue.Queue 解耦；
-    `read_events()` 由 HTTP / WebSocket 侧轮询取走增量事件。
+    `read_events(since)` 由 HTTP / WebSocket 侧按游标取增量事件。
+
+    事件是**广播**而不是队列：每个订阅者拿自己的游标来读，
+    读事件不改变引擎状态，谁读都不会把别人的事件吃掉。
+    早期版本用「读走即清空」的共享列表，只要同时开着两个页面
+    （电脑 + 手机是这套软件的正常用法），两个页面就会互相抢事件，
+    表现为「累计次数 17 但只列出 2 条」。
     """
+
+    # 事件缓冲区最多留多少条。命中事件只在确认时产生（一场游戏几十条），
+    # 留 400 条既够落后几秒的订阅者追上，也不会无限涨。
+    MAX_EVENTS = 400
 
     def __init__(self, lib: SoundLibrary, params: dict | None = None,
                  denoise: dict | None = None) -> None:
@@ -205,7 +215,10 @@ class LiveRecognizer:
         self.meter = LevelMeter()
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
+        # 事件缓冲：只保留最近 MAX_EVENTS 条，配合单调递增的「总条数」当游标。
+        # _events_dropped 记录被丢弃的条数，好让游标跨丢弃保持单调。
         self._events: list[dict] = []
+        self._events_dropped = 0
         self._lock = threading.Lock()
         self.running = False
         self.started_at = 0.0
@@ -224,7 +237,12 @@ class LiveRecognizer:
         self.last_verdict = None
         self.capture.start(device_index)
         self._stop.clear()
-        self._events.clear()
+        with self._lock:
+            # 清掉上一轮的事件，但**不能把游标归零**：游标必须单调递增，
+            # 否则重新开始监听后，一直挂着的 SSE 连接（游标停在旧的高位）
+            # 会永远读不到新事件。把清掉的条数记进 _events_dropped 即可。
+            self._events_dropped += len(self._events)
+            self._events.clear()
         self.hop_index = 0
         self.frame_seconds = 0.0
         self.started_at = time.time()
@@ -269,6 +287,11 @@ class LiveRecognizer:
 
     def _loop(self) -> None:
         sr = self.capture.sample_rate
+        # 分析器的 mel 滤波器组、帧长、跳长全是按 48k 定的。设备原生采样率可能
+        # 是 44100（本机麦克风全是 44.1k），不重采样会让每一帧的时长和频带位置
+        # 都偏掉，识别率会毫无征兆地塌方。用带相位状态的流式重采样，块之间
+        # 不累积误差（对每块单独调 resample() 会因逐块四舍五入慢慢漂）。
+        resampler = dsp.StreamResampler(sr, config.SAMPLE_RATE)
         pending = np.zeros(0, dtype=np.float32)
         while not self._stop.is_set():
             block = self.capture.read(timeout=0.1)
@@ -277,6 +300,7 @@ class LiveRecognizer:
                 # 否则电平表会永远停在最后一次声音的画面上。
                 self.meter.fill(self.meter.MIN_DB, int(0.1 / config.HOP_SECONDS))
                 continue
+            block = resampler.push(block)
             pending = np.concatenate([pending, block]) if pending.size else block
             self.analyzer.push(pending)
             pending = np.zeros(0, dtype=np.float32)
@@ -285,9 +309,13 @@ class LiveRecognizer:
                 self.frame_seconds = at
                 verdict = self.matcher.push(patch, level, at)
                 self.meter.push(level)
-                # 「当前判定」只接受足够强的候选（≥ confirm_score），
-                # 否则环境噪声里那些 0.5 分左右的弱候选会把大字区域刷成假结果。
-                if verdict is not None and verdict.score >= self.params["confirm_score"]:
+                # 「当前判定」和最终确认用同一套两条路：要么够像（干净音效），
+                # 要么一直明显领先（被背景掩蔽时）。只走后者会让干净音效
+                # 在第一帧就因持续量不足而迟迟不显示；只走前者又会漏掉掩蔽场景。
+                # 判据直接问 matcher，避免两处条件各改各的慢慢走岔。
+                if (verdict is not None
+                        and self.matcher.accepts(verdict.peak_score, verdict.peak_gap,
+                                                 verdict.mass, verdict.votes)):
                     item = self.lib.item(verdict.id)
                     self.last_verdict = {
                         "id": verdict.id,
@@ -315,21 +343,43 @@ class LiveRecognizer:
                     self._push_event({"type": "hit", "hit": hit_to_json(h, self.lib),
                                       "at": round(time.time() - self.started_at, 3)})
                 self.hop_index += 1
-            # 让出 GIL，避免长时间独占（模型数据 2048 维，运算很轻）
+            # 让出 GIL，避免长时间独占（模型数据 config.DIM 维，运算很轻）
             time.sleep(0)
 
     def _push_event(self, ev: dict) -> None:
         with self._lock:
             self._events.append(ev)
-            if len(self._events) > 200:
-                del self._events[:-200]
+            # 只保留最近 MAX_EVENTS 条：游标是单调递增的序号，落后太多的
+            # 订阅者（比如手机锁屏两小时）会被直接跳到最早保留的位置，
+            # 而不是越积越多把内存吃光。
+            if len(self._events) > self.MAX_EVENTS:
+                drop = len(self._events) - self.MAX_EVENTS
+                del self._events[:drop]
+                self._events_dropped += drop
 
     # ------------------------------------------------------------ 读取
 
-    def read_events(self) -> list[dict]:
+    def event_cursor(self) -> int:
+        """订阅者刚开始读时该用的游标：从「当前最新」开始，不重放历史。
+
+        页面刚打开就收到这一轮之前的全部命中会让人莫名其妙，
+        而且那些命中在打开页面时本来就看不到。
+        """
         with self._lock:
-            out, self._events = self._events, []
-        return out
+            return self._events_dropped + len(self._events)
+
+    def read_events(self, since: int = 0) -> tuple[list[dict], int]:
+        """取游标 `since` 之后的事件，返回 (事件列表, 新游标)。
+
+        纯读取，不清空、不推进别人的游标 —— 多个订阅者各读各的。
+        """
+        with self._lock:
+            newest = self._events_dropped + len(self._events)
+            oldest = self._events_dropped
+            start = max(since, oldest)
+            begin = start - oldest
+            out = self._events[begin:]
+            return out, newest
 
     def status(self) -> dict:
         dev = self.capture.device

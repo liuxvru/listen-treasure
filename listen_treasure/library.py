@@ -5,7 +5,7 @@ library.json 由 `scripts/build_library.py` 生成，结构：
     {
       "version": 3,
       "sample_rate": 48000,
-      "dim": 2048,
+      "dim": 1536,
       "entries": [
         {
           "id": "1",
@@ -19,8 +19,8 @@ library.json 由 `scripts/build_library.py` 生成，结构：
       ]
     }
 
-补丁是 2048 维 float32 量化成 int8（除以 254），base64 编码 —— 体积从
-17×4×2048×4B ≈ 560KB 压到约 130KB。
+补丁是 1536 维（=64 带 × 24 帧）float32 量化成 int8（除以 254），base64
+编码 —— 体积从 17×4×1536×4B ≈ 420KB 压到约 100KB。
 """
 
 from __future__ import annotations
@@ -34,6 +34,28 @@ from pathlib import Path
 import numpy as np
 
 from . import config
+
+
+class LibraryStale(RuntimeError):
+    """library.json 与当前识别参数对不上，必须重建。
+
+    最典型的场景：改了 `config.WINDOW_FRAMES`（补丁长度），补丁维度从
+    2048 变成 1536，但旧库里的模板还是 2048 维。这时候如果硬加载，
+    要等到第一次匹配才会在 `matrix @ patch` 上抛一个看不出原因的
+    ValueError（或者更糟：静默给出全错的分）。所以在载入时就拦下来。
+    """
+
+
+def stale_reason(raw: dict) -> str | None:
+    """库里的参数与当前代码不一致时返回人话原因，正常返回 None。"""
+    dim = int(raw.get("dim") or 0)
+    if dim and dim != config.DIM:
+        return (f"补丁维度 {dim} ≠ 当前 {config.DIM}"
+                f"（WINDOW_FRAMES={config.WINDOW_FRAMES}）")
+    sr = int(raw.get("sampleRate") or raw.get("sample_rate") or 0)
+    if sr and sr != config.SAMPLE_RATE:
+        return f"采样率 {sr} ≠ 当前 {config.SAMPLE_RATE}"
+    return None
 
 
 def _dequantize(b64: str, dim: int) -> np.ndarray:
@@ -114,6 +136,9 @@ class SoundLibrary:
             raise FileNotFoundError(f"找不到声音库：{p}（先跑 scripts/build_library.py）")
         with p.open("r", encoding="utf-8") as fh:
             raw = json.load(fh)
+        reason = stale_reason(raw)
+        if reason:
+            raise LibraryStale(f"声音库和当前参数对不上：{reason}（重跑 scripts/build_library.py）")
 
         lib = cls()
         lib.version = int(raw.get("version", 1))

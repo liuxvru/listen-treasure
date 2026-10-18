@@ -18,7 +18,7 @@
      “底噪 + 4dB”的补丁直接跳过——静音段不会再被硬凑成某个音效。
 
 2. **补丁（patch）特征**
-   170ms 窗口 × 64 个 mel 带 = 2048 维，做“相对地板的 log → 去均值 → L2 归一化”。
+   `config.PATCH_SECONDS` 窗口 × 64 个 mel 带 = `config.DIM` 维（默认 128ms），做“相对地板的 log → 去均值 → L2 归一化”。
    去均值这一步很重要：它让特征只描述**频谱形状**，与整体音量、
    录音链路的频率响应无关，所以同一段音效在不同音量下仍然对得上。
 """
@@ -39,7 +39,13 @@ _EPS = 1e-10
 
 
 def resample(x: np.ndarray, from_rate: int, to_rate: int) -> np.ndarray:
-    """线性插值重采样（降采样时先做滑动平均抗混叠）。"""
+    """线性插值重采样（降采样时先做滑动平均抗混叠）。
+
+    注意取点位置必须是 `i * from_rate/to_rate` 而不是 `i`：早先这里写成
+    `np.interp(np.arange(n_out), np.arange(x.size), x)`，等价于"直接截前 n_out 个
+    样本"，96k→48k 时音高会整整低一个八度（实测 1kHz 正弦出来是 499.5Hz），
+    44.1k→48k 时尾部还会被 np.interp 夹成常数。
+    """
     x = np.asarray(x, dtype=np.float32)
     if from_rate == to_rate or x.size == 0:
         return x
@@ -52,10 +58,51 @@ def resample(x: np.ndarray, from_rate: int, to_rate: int) -> np.ndarray:
     n_out = int(round(x.size * to_rate / from_rate))
     if n_out <= 0:
         return np.zeros(0, dtype=np.float32)
-    src = np.arange(x.size, dtype=np.float64) * (from_rate / to_rate)
-    idx = np.arange(n_out, dtype=np.float64)
-    out = np.interp(idx, np.arange(x.size, dtype=np.float64), x.astype(np.float64))
+    src = np.arange(n_out, dtype=np.float64) * (from_rate / to_rate)
+    out = np.interp(src, np.arange(x.size, dtype=np.float64), x.astype(np.float64))
     return out.astype(np.float32)
+
+
+class StreamResampler:
+    """带相位状态的流式重采样。
+
+    采集回调是分块进来的（1024 样本一块），如果对每块单独调 `resample()`，
+    每块输出长度都要四舍五入，几十块以后就会累积出可见的时间漂移，块与块
+    之间还会因为插值终点被截断而出现台阶。这里把"当前读取位置的分数部分"
+    记在 `self._pos` 里跨块传递，输出长度天然紧跟输入，不产生累积误差。
+    """
+
+    def __init__(self, from_rate: int, to_rate: int) -> None:
+        self.from_rate = int(from_rate)
+        self.to_rate = int(to_rate)
+        self.enabled = self.from_rate != self.to_rate and self.from_rate > 0
+        self.ratio = self.from_rate / self.to_rate if self.enabled else 1.0
+        self._buf = np.zeros(0, dtype=np.float64)
+        self._pos = 0.0
+
+    def push(self, x: np.ndarray) -> np.ndarray:
+        if not self.enabled:
+            return np.asarray(x, dtype=np.float32)
+        x = np.asarray(x, dtype=np.float64)
+        self._buf = np.concatenate([self._buf, x]) if self._buf.size else x
+        # 每次多出来的样本数由比值决定，用 int(可用区间/ratio) 预估后逐个消解边界
+        avail = self._buf.size - 1 - self._pos
+        if avail <= 0:
+            return np.zeros(0, dtype=np.float32)
+        n_out = int(avail / self.ratio) + 1
+        if n_out <= 0:
+            return np.zeros(0, dtype=np.float32)
+        pos = self._pos + np.arange(n_out, dtype=np.float64) * self.ratio
+        pos = pos[pos <= self._buf.size - 1]
+        if pos.size == 0:
+            return np.zeros(0, dtype=np.float32)
+        out = np.interp(pos, np.arange(self._buf.size, dtype=np.float64), self._buf)
+        self._pos = float(pos[-1]) + self.ratio
+        drop = int(self._pos)
+        if drop > 0:
+            self._buf = self._buf[drop:]
+            self._pos -= drop
+        return out.astype(np.float32)
 
 
 # ---------------------------------------------------------------- mel 滤波器组
@@ -93,6 +140,79 @@ _BANK = mel_filterbank()
 _WINDOW = get_window("hann", config.FRAME_SIZE).astype(np.float32)
 _WINDOW_SQ = (_WINDOW.astype(np.float64) ** 2).astype(np.float32)
 _WINDOW_GAIN = _WINDOW.sum() / 2.0  # 用于把功率谱近似还原成幅度
+
+
+# ---------------------------------------------------------------- 频带加权
+#
+# 匹配空间里给低频带一点惩罚，理由和标定见 config.py 的 BAND_WEIGHT_* 注释。
+# 这里只提供「权重怎么算」「怎么施加」，具体在哪施加由 matcher 决定。
+
+
+def mel_centers(sample_rate: int = config.SAMPLE_RATE,
+                frame_size: int = config.FRAME_SIZE) -> np.ndarray:
+    """每个 mel 三角滤波器的重心频率（Hz），用来给频带加权定位。"""
+    if sample_rate == config.SAMPLE_RATE and frame_size == config.FRAME_SIZE:
+        bank = _BANK
+    else:
+        bank = mel_filterbank(sample_rate, frame_size)
+    freqs = np.fft.rfftfreq(frame_size, 1.0 / sample_rate)
+    return np.array([float((bank[i] * freqs).sum() / max(float(bank[i].sum()), _EPS))
+                     for i in range(bank.shape[0])], dtype=np.float32)
+
+
+_BAND_WEIGHT: np.ndarray | None = None
+
+
+def band_weight(f0_hz: float | None = None, w_min: float | None = None) -> np.ndarray:
+    """返回 `config.DIM` 维（=64 带 × WF 帧，逐帧相同）的频带权重。
+
+    `f0` 以上权重为 1，以下按倍频程线性衰减到 `w_min`（最低到 1/8 处封顶），
+    最后把均值归一化到 1 —— 常数缩放对余弦相似度没影响，归一化只是便于读数。
+    """
+    f0 = float(config.BAND_WEIGHT_F0_HZ if f0_hz is None else f0_hz)
+    w_min = float(config.BAND_WEIGHT_MIN if w_min is None else w_min)
+    centers = mel_centers()
+    x = np.clip(np.log2(np.maximum(centers, 1.0) / max(f0, 1.0)), -3.0, 0.0)  # -3..0
+    raw = np.exp(x)  # 1/8 .. 1
+    lo = float(raw.min())
+    span = max(1.0 - lo, _EPS)
+    w = w_min + (1.0 - w_min) * (raw - lo) / span  # 线性映射到 [w_min, 1]
+    w = w / float(w.mean())
+    return np.tile(w.astype(np.float32), config.WINDOW_FRAMES)
+
+
+def _cached_band_weight() -> np.ndarray | None:
+    """按 config 里的参数缓存权重；w_min >= 1 视为不加权（返回 None）。"""
+    global _BAND_WEIGHT
+    if float(config.BAND_WEIGHT_MIN) >= 1.0:
+        return None
+    if _BAND_WEIGHT is None:
+        _BAND_WEIGHT = band_weight()
+    return _BAND_WEIGHT
+
+
+def weight_patch(patch: np.ndarray) -> np.ndarray:
+    """给单个已归一化的补丁加权重并重新做 L2 归一化。"""
+    w = _cached_band_weight()
+    if w is None or patch.size != w.size:
+        return patch
+    out = np.asarray(patch, dtype=np.float32) * w
+    nrm = float(np.sqrt(np.dot(out, out)))
+    if nrm <= 1e-12:
+        return np.asarray(patch, dtype=np.float32)
+    return (out / nrm).astype(np.float32)
+
+
+def weight_matrix(matrix: np.ndarray) -> np.ndarray:
+    """给模板矩阵（每行一个已归一化补丁）加权重并逐行重新归一化。"""
+    w = _cached_band_weight()
+    m = np.asarray(matrix, dtype=np.float32)
+    if w is None or m.ndim != 2 or m.shape[1] != w.size:
+        return m
+    out = m * w[None, :]
+    norms = np.sqrt(np.sum(out * out, axis=1, keepdims=True))
+    norms = np.maximum(norms, 1e-12)
+    return (out / norms).astype(np.float32)
 
 
 # ---------------------------------------------------------------- 降噪
@@ -345,7 +465,7 @@ class NoiseReducer:
 
 
 class Analyzer:
-    """流式分析器：推进样本，产出 170ms 补丁（2048 维）。"""
+    """流式分析器：推进样本，产出定长补丁（`config.DIM` 维，默认 128ms）。"""
 
     def __init__(self, denoise_params: dict | None = None, sample_rate: int = config.SAMPLE_RATE) -> None:
         self.sample_rate = sample_rate
@@ -419,7 +539,7 @@ class Analyzer:
         补丁 i 覆盖帧区间 [i, i+WF)。必须按**该位置**取窗，不能反复调用
         patch() —— patch() 永远返回最新的 WF 帧，一次推进多帧时会把
         同一个窗口重复产出几十次（早期版本就是这个 bug：所有模板
-        都是最后 170ms，音效开头的声音永远对不上）。
+        都是最后那一个窗口，音效开头的声音永远对不上）。
         """
         if not hasattr(self, "_emitted"):
             self._emitted = 0

@@ -186,18 +186,28 @@ async def api_live_events(request: Request) -> StreamingResponse:
     用“轮询内部列表 + asyncio.sleep”而不是真队列，是因为识别线程是普通
     threading.Thread，跨线程 await 反而更麻烦；250ms 一次的轮询对这个
     数据量完全够（事件本来就只有命中时才有）。
+
+    每个连接各拿一个游标去读引擎的事件缓冲，读事件是**纯读取**，不会
+    推进别人的游标。所以电脑和手机同时开着两个页面时，两边都能各自
+    收到全部命中（早期版本共用一个「读走即清空」的队列，两个页面会
+    互相抢事件，表现为「累计 17 次但只列出 2 条」）。
     """
 
     async def gen():
         yield "retry: 2000\n\n"
         last_status = 0.0
         idle = 0.0
+        cursor: int | None = None
         while True:
             if await request.is_disconnected():
                 break
             engine = _live
             if engine is not None:
-                for ev in engine.read_events():
+                if cursor is None:
+                    # 刚连上：从这个时刻之后的事件开始发，不重放本次监听的历史
+                    cursor = engine.event_cursor()
+                events, cursor = engine.read_events(cursor)
+                for ev in events:
                     yield f"data: {json.dumps(ev, ensure_ascii=False)}\n\n"
                 now = time.time()
                 if now - last_status >= 0.25:
@@ -205,6 +215,7 @@ async def api_live_events(request: Request) -> StreamingResponse:
                     payload = {"type": "status", "status": engine.status()}
                     yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
             else:
+                cursor = None  # 引擎被回收，下次连上重新定基准
                 # 没启动时也要保持连接活着，否则前端 onerror 会一直重连
                 idle += 0.25
                 if idle >= 5.0:
@@ -486,6 +497,15 @@ def mobile_index():
     page = _UI_DIR / "mobile.html"
     if not page.exists():
         raise HTTPException(404, "手机端页面缺失：listen_treasure/ui/mobile.html")
+    return FileResponse(page, media_type="text/html; charset=utf-8")
+
+
+@app.get("/live")
+def live_index():
+    """实时监视台：命中记录在右栏，左边专心看当前判定。"""
+    page = _UI_DIR / "live.html"
+    if not page.exists():
+        raise HTTPException(404, "监视台页面缺失：listen_treasure/ui/live.html")
     return FileResponse(page, media_type="text/html; charset=utf-8")
 
 

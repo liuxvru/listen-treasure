@@ -91,6 +91,21 @@ def _bootstrap_data() -> None:
         )
 
 
+def _library_stale() -> str | None:
+    """现有 library.json 是否与当前参数对不上（例如改了补丁窗口长度）。"""
+    import json
+
+    if not config.LIBRARY_JSON.exists():
+        return None
+    try:
+        raw = json.loads(config.LIBRARY_JSON.read_text(encoding="utf-8"))
+    except Exception as exc:
+        return f"library.json 读不出来：{exc}"
+    from listen_treasure.library import stale_reason
+
+    return stale_reason(raw)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="行商听声鉴宝 - 本地识别服务")
     ap.add_argument("--host", default=config.HOST)
@@ -103,6 +118,13 @@ def main() -> int:
     args = ap.parse_args()
     if args.lan:
         args.host = "0.0.0.0"
+
+    stale = _library_stale()
+    if stale and not args.rebuild:
+        # 改了补丁长度/采样率之类，旧库的模板维度就不对了。硬加载会在第一次
+        # 匹配时抛 ValueError，所以这里直接重建一次，别让用户自己猜。
+        print(f"[建库] 声音库已过期（{stale}），自动重建…")
+        args.rebuild = True
 
     if args.rebuild:
         from listen_treasure.library import build_library_from_codex

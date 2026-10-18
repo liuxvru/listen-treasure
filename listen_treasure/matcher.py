@@ -3,7 +3,8 @@
 核心思路（和开源项目 soundradar 一致，但打分和确认逻辑重写）：
 
 1. **补丁是音效的“局部快照”，不是整段平均**
-   模板 = 该音效若干关键位置的 170ms 补丁；查询 = 当前时刻的最近 170ms。
+   模板 = 该音效若干关键位置的定长补丁（`config.PATCH_SECONDS`，默认 128ms）；
+   查询 = 当前时刻最近的一个窗口。
    音效只响几十毫秒、或与环境音叠在一起，也能单独对上。
 
 2. **一次只出一个判定**
@@ -18,7 +19,7 @@
    但“谁最像”这个相对关系会保留。
 
 4. **事件级候选：先攒着，等声音过去再一次性结算**
-   这是最关键的一条。逐帧打分在音效边缘会掉到 0.7 左右（170ms 窗口
+   这是最关键的一条。逐帧打分在音效边缘会掉到 0.7 左右（窗口里
    一半是音效一半是静音），而两个高度相似的音效之间 top-1 还会来回跳。
    如果“哪一帧达标就当场上报”，一段 0.7s 的音效会被拆成好几次命中，
    还会把 #2 播放期间的 #9 误报出来（实测 3 处误报）。
@@ -36,7 +37,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from . import config
+from . import config, dsp
 
 
 @dataclass
@@ -50,6 +51,10 @@ class Verdict:
     rise: float
     confidence: float
     confirmed: bool
+    mass: float = 0.0  # 该候选到此为止累积的持续量（界面用来判断“够不够格显示”）
+    peak_score: float = 0.0  # 所属候选到目前的最好成绩（判据用候选成绩，不用单帧）
+    peak_gap: float = 0.0
+    votes: int = 0
 
 
 @dataclass
@@ -75,6 +80,7 @@ class _Candidate:
     peak_score: float
     peak_gap: float
     votes: int
+    mass: float  # Σ(max(score - 0.5, 0))：持续量，低分帧贡献极少
 
 
 def confidence_of(score: float, gap: float) -> float:
@@ -97,6 +103,9 @@ class Matcher:
         self.p = dict(config.MATCH_DEFAULTS)
         if params:
             self.p.update(params)
+        # 频带加权只施加在**查询**一侧（见 dsp.weight_patch / config.BAND_WEIGHT_*）。
+        # 模板矩阵保持原样：两侧都加权虽然也有效，但实测会把白噪场景从 16/17
+        # 拖到 11/17，只加查询侧只掉到 14/17，而真实游戏背景的收益几乎一样。
         self.matrix = library.matrix  # (N, DIM)
         self.owners = library.matrix_owners
         self.ids = list(dict.fromkeys(self.owners))  # 去重且保持顺序
@@ -119,7 +128,7 @@ class Matcher:
         """返回 (最佳音效 id, 最佳分, 不同音效的次佳分)。"""
         if self.matrix is None or not self.ids:
             return None, 0.0, 0.0
-        scores = self.matrix @ patch  # (N,) 一次算完所有模板
+        scores = self.matrix @ dsp.weight_patch(patch)  # (N,) 一次算完所有模板
         best_per_id = np.full(len(self.ids), -2.0, dtype=np.float64)
         np.maximum.at(best_per_id, self._owner_idx, scores)
         top = int(np.argmax(best_per_id))
@@ -170,6 +179,10 @@ class Matcher:
             confidence=confidence_of(cand.peak_score if cand else score,
                                      cand.peak_gap if cand else gap),
             confirmed=False,
+            mass=cand.mass if cand else max(0.0, score - 0.5),
+            peak_score=cand.peak_score if cand else score,
+            peak_gap=cand.peak_gap if cand else gap,
+            votes=cand.votes if cand else 1,
         )
 
     # ------------------------------------------------------------ 候选累积
@@ -178,7 +191,7 @@ class Matcher:
         cand = self.candidates.get(sid)
         if cand is None:
             # at_sec 已经是这个补丁窗口的**起点**（iter_patches 按 idx*hop 给），
-            # 不要再减 PATCH_SECONDS——那会整整提前 170ms。
+            # 不要再减 PATCH_SECONDS——那会整整提前一个窗口长度。
             self.candidates[sid] = _Candidate(
                 id=sid,
                 start_frame=self.frame,
@@ -187,29 +200,55 @@ class Matcher:
                 peak_score=score,
                 peak_gap=gap,
                 votes=1,
+                mass=max(0.0, score - 0.5),
             )
             return
         cand.last_frame = self.frame
         cand.peak_score = max(cand.peak_score, score)
         cand.peak_gap = max(cand.peak_gap, gap)
         cand.votes += 1
+        cand.mass += max(0.0, score - 0.5)
+
+    def accepts(self, peak_score: float, peak_gap: float, mass: float,
+                votes: int) -> bool:
+        """候选够不够格被确认。两条路二选一，含义见 _settle 的 docstring。
+
+        `engine` 显示「当前判定」时也调这里，而不是自己再抄一遍条件——
+        抄一遍就有两处需要同步，迟早会走岔。
+        """
+        if votes < self.p["min_score_frames"]:
+            return False
+        strong = (peak_score >= self.p["strong_score"]
+                  and peak_gap >= self.p["min_gap"])
+        persistent = (peak_score >= self.p["confirm_score"]
+                      and peak_gap >= self.p["confirm_gap"]
+                      and mass >= self.p["confirm_mass"])
+        return strong or persistent
 
     def _settle(self, at_sec: float, force: bool = False) -> None:
         """把已经安静够久的候选结算掉：够强的报出去，不够的丢掉。
 
         force=True 时忽略“安静够久”条件，把还挂着的候选全部结算——
         流结束时必须这样做，否则最后一段声音永远等不到释放窗口。
+
+        接受方式是两条路二选一（标定见 config.MATCH_DEFAULTS 的注释）：
+
+        1. **强证据**：峰值相似度 ≥ strong_score。干净音效走这条，
+           和旧版行为完全一致，不动已标定好的干净/降噪场景。
+        2. **持续性证据**：峰值只有 0.6~0.8（被背景掩蔽时就这样），
+           但整个候选期间它一直明显领先（gap 大、持续量够）。
+           这一条是新增的召回来源，取的是「一直最像」而不是「某一帧很像」。
+
+        为什么不能只压低阈值：被掩蔽的真音效峰值 0.52~0.75，误报的峰值
+        0.72~0.77，两者在峰值上完全重叠，单看峰值怎么调都会顾此失彼。
+        但 gap（真音效 p25 0.32 / 误报 p75 0.16）和持续量（真音效 p25 2.9 /
+        误报 p75 0.79）都不重叠，所以可以用第二条路把它们分开。
         """
         quiet = self.p["release_frames"]
         for sid in [k for k, c in self.candidates.items()
                     if force or self.frame - c.last_frame > quiet]:
             cand = self.candidates.pop(sid)
-            ok = (
-                cand.peak_score >= self.p["confirm_score"]
-                and cand.peak_gap >= self.p["min_gap"]
-                and cand.votes >= self.p["min_score_frames"]
-            )
-            if not ok:
+            if not self.accepts(cand.peak_score, cand.peak_gap, cand.mass, cand.votes):
                 self.stats["rejected"] += 1
                 continue
             self.stats["confirmations"] += 1

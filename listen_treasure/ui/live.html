@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" href="data:," />
+    <title>听声鉴宝 · 实时监视台</title>
+    <link rel="stylesheet" href="/static/ui/live.css" />
+  </head>
+  <body>
+    <!-- ============ 左栏：实时识别 ============ -->
+    <div class="live-col live-left" id="left-col">
+      <!-- 顶栏：品牌 + 连接状态 + 设备下拉 + 开始/停止监听 -->
+      <header class="panel topbar">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true">◉</span>
+          <div class="brand-text">
+            <h1>听声鉴宝 · 实时监视台</h1>
+            <p class="sub">左栏实时识别，右栏记录每一次命中</p>
+          </div>
+          <span class="conn" id="conn" data-state="wait">
+            <i class="conn-dot" aria-hidden="true"></i>
+            <span id="conn-text">连接中</span>
+          </span>
+          <a class="btn tiny ghost back-link" href="/" title="回到图鉴页">图鉴 ↗</a>
+        </div>
+
+        <div class="ctl">
+          <label class="field">
+            <span class="field-label">音频源</span>
+            <select class="select" id="device-select" aria-label="选择音频设备">
+              <option value="">加载设备中…</option>
+            </select>
+          </label>
+          <button class="btn icon" id="btn-refresh" type="button" title="刷新设备列表" aria-label="刷新设备列表">
+            ⟳
+          </button>
+          <button class="btn live-btn" id="btn-live" type="button" data-state="idle">
+            <span class="live-icon" aria-hidden="true">▶</span>
+            <span id="live-label">开始监听</span>
+          </button>
+        </div>
+
+        <div class="live-meta">
+          <span id="live-elapsed">00:00</span>
+          <span class="sep" aria-hidden="true">·</span>
+          <span id="live-device">未开始</span>
+          <span class="sep" aria-hidden="true">·</span>
+          <span id="device-hint">—</span>
+        </div>
+      </header>
+
+      <!-- 当前判定：大字音效名 + 相似度/置信度/领先 + 进度条 + 累计次数 -->
+      <section class="panel verdict-panel" id="verdict-panel" data-has="false" aria-live="polite">
+        <div class="panel-head">
+          <h2>当前判定</h2>
+          <span class="panel-hint" id="verdict-count">累计 0 次</span>
+        </div>
+        <div class="verdict-name" id="verdict-name">等待声音…</div>
+        <div class="verdict-facts" id="verdict-facts">点上面的「开始监听」，或拖一个音频文件进来识别</div>
+        <div class="verdict-bar"><i id="verdict-bar-fill"></i></div>
+        <div class="verdict-foot">
+          <span id="verdict-state">未开始</span>
+          <span id="verdict-items">—</span>
+        </div>
+      </section>
+
+      <!-- 实时电平：40 根柱子 -->
+      <section class="panel level-panel">
+        <div class="panel-head">
+          <h2>实时电平</h2>
+          <span class="panel-hint mono" id="level-readout">−∞ dB</span>
+        </div>
+        <div class="level-bars" id="level-bars" data-active="false"></div>
+      </section>
+
+      <!-- 文件识别 -->
+      <section class="panel file-panel">
+        <div class="panel-head">
+          <h2>文件识别</h2>
+          <span class="panel-hint" id="file-status">wav / mp3 / ogg / flac / m4a</span>
+        </div>
+        <div class="dropzone" id="dropzone" role="button" tabindex="0">
+          <span class="dz-icon" aria-hidden="true">📁</span>
+          <span class="dz-text">点击选择音频文件，或把文件拖到这里</span>
+        </div>
+        <input
+          type="file"
+          id="file-input"
+          accept=".wav,.mp3,.ogg,.oga,.flac,.m4a,.aac,audio/*"
+          hidden
+        />
+      </section>
+    </div>
+
+    <!-- ============ 右栏：命中记录（上）+ 本次藏品（下） ============ -->
+    <div class="live-col live-right" id="right-col">
+      <section class="panel hits-panel" id="hits-panel">
+        <div class="panel-head">
+          <h2>命中记录</h2>
+          <button class="btn tiny ghost" id="btn-clear-hits" type="button" title="清空命中记录">
+            清空
+          </button>
+        </div>
+        <ul class="hits-list" id="hits-list">
+          <li class="hits-empty" id="hits-empty">还没有命中…</li>
+        </ul>
+      </section>
+
+      <section class="panel stash-panel" id="stash-panel" data-has="false">
+        <div class="panel-head">
+          <h2>本次藏品</h2>
+          <span class="panel-hint" id="stash-hint">等待识别</span>
+        </div>
+        <div class="stash-rows" id="stash-rows">
+          <p class="stash-empty" id="stash-empty">
+            识别到音效后，这里按占格分组列出藏品：同一占格的排一行，行内价值从高到低。
+          </p>
+        </div>
+      </section>
+    </div>
+
+    <div class="toast" id="toast" hidden></div>
+
+    <script type="module" src="/static/ui/live.js"></script>
+  </body>
+</html>

@@ -206,6 +206,22 @@ select {
   to { transform: rotate(360deg); }
 }
 
+/* 「监视台」跳转：是个 <a>，要按按钮样子显示，所以得清掉下划线和颜色继承 */
+.nav-btn {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 12px;
+  font-size: 12px;
+  white-space: nowrap;
+  text-decoration: none;
+  color: var(--text-dim);
+}
+
+.nav-btn:hover {
+  color: var(--accent);
+  border-color: rgba(82, 196, 26, 0.45);
+}
+
 .stat-pills {
   display: flex;
   gap: 8px;
