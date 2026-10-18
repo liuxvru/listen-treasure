@@ -19,17 +19,3 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-
----------------------------------------------------------------------------
-关于仓库里的第三方内容
-
-本仓库的 MIT 许可只覆盖本项目的源代码。以下内容不在本仓库内，且权利归
-各自的所有者：
-
-1. 游戏《暗区突围》的音效、藏品图片、名称与价值数据。它们由
-   `scripts/crawl.py` 从 https://aqtwwx.net 抓取，用于本地识别比对，
-   不随本仓库分发。版权归游戏开发商 / 站点运营方所有。
-2. 站点前端的 JS 打包产物（开发期逆向记录，未入库）。
-3. 参考过的其它开源项目的源码片段（未入库，仅在思路层面参考）。
-
-如果你要分发通过本工具抓下来的数据，请自行确认你有权这么做。
