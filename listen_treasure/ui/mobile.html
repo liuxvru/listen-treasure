@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#0b0f0d" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<title>听声鉴宝</title>
+<link rel="stylesheet" href="/static/ui/mobile.css" />
+</head>
+<body>
+
+<header class="top">
+  <div class="top-main">
+    <span class="brand-dot" aria-hidden="true"></span>
+    <h1>听声鉴宝</h1>
+    <span class="conn" id="conn" data-state="idle">
+      <i class="conn-dot" aria-hidden="true"></i>
+      <span id="conn-text">连接中</span>
+    </span>
+  </div>
+  <button class="icon-btn" id="btn-refresh" type="button" aria-label="刷新">⟳</button>
+</header>
+
+<main class="wrap">
+
+  <!-- 当前判定：抬手一眼就要看清 -->
+  <section class="verdict" id="verdict" data-has="false" aria-live="polite">
+    <div class="verdict-name" id="verdict-name">等待声音…</div>
+    <div class="verdict-facts" id="verdict-facts">点下面的按钮开始监听</div>
+    <div class="verdict-bar"><i id="verdict-bar-fill"></i></div>
+    <div class="verdict-foot">
+      <span id="verdict-state">未开始</span>
+      <span id="verdict-count">累计 0 次</span>
+    </div>
+  </section>
+
+  <!-- 本次藏品：按占格分组，同占格一行，行内价值降序 -->
+  <section class="card stash" id="stash" data-has="false">
+    <div class="card-head">
+      <h2>本次藏品</h2>
+      <span class="card-hint" id="stash-hint">等待识别</span>
+    </div>
+    <div class="stash-rows" id="stash-rows">
+      <p class="stash-empty">识别到音效后，这里按占格分组列出藏品：同一占格的排一行，行内价值从高到低。</p>
+    </div>
+  </section>
+
+  <!-- 电平 -->
+  <section class="card level-card">
+    <div class="card-head">
+      <h2>电平</h2>
+      <span class="card-hint mono" id="level-readout">−∞ dB</span>
+    </div>
+    <div class="level-bars" id="level-bars"></div>
+  </section>
+
+  <!-- 控制 -->
+  <section class="card">
+    <div class="card-head">
+      <h2>采集</h2>
+      <span class="card-hint" id="device-hint">—</span>
+    </div>
+    <label class="field">
+      <span class="field-label">音频源</span>
+      <select id="device-select" class="select">
+        <option value="">默认回环设备（自动）</option>
+      </select>
+    </label>
+    <button class="live-btn" id="btn-live" type="button" data-state="idle">
+      <span class="live-icon" aria-hidden="true">▶</span>
+      <span id="live-label">开始监听</span>
+    </button>
+    <div class="live-meta">
+      <span id="live-elapsed">00:00</span>
+      <span class="dot-sep" aria-hidden="true">·</span>
+      <span id="live-device">未开始</span>
+    </div>
+  </section>
+
+  <!-- 文件识别 -->
+  <section class="card">
+    <div class="card-head">
+      <h2>文件识别</h2>
+    </div>
+    <input type="file" id="file-input" accept="audio/*" hidden />
+    <button class="ghost-btn" id="btn-file" type="button">选择音频文件</button>
+  </section>
+
+  <!-- 命中记录 -->
+  <section class="card">
+    <div class="card-head">
+      <h2>命中记录</h2>
+      <button class="text-btn" id="btn-clear" type="button">清空</button>
+    </div>
+    <ul class="hits" id="hits">
+      <li class="hits-empty" id="hits-empty">还没有命中</li>
+    </ul>
+  </section>
+
+</main>
+
+<div class="toast" id="toast" hidden></div>
+
+<script type="module" src="/static/ui/mobile.js"></script>
+</body>
+</html>

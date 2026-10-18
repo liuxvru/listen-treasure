@@ -1,0 +1,38 @@
+# ---- 参考数据：不进仓库 ----
+# data/ 里是游戏音效（wav）和藏品图（png/webp），版权归游戏方。
+# 首次运行 `python scripts/run.py` 会自动抓一次（约 2~3 分钟）。
+# 想手动抓：`python scripts/crawl.py`
+data/
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+env/
+
+# ---- 开发期的临时文件 / 逆向记录 / 截图 ----
+# scratch/ 是开发过程中拆解站点接口、抓包、调试用的东西：
+#   scratch/crawl/index.js  站点打包产物（第三方代码，不转分发）
+#   scratch/ref/            另一个开源项目的源码（第三方代码，不转分发）
+#   scratch/e2e/shots/      调试截图
+# 测试脚本已经整理进 tests/，scratch/ 不上传。
+scratch/
+
+# 测试跑出来的截图
+tests/shots/
+
+# ---- 编辑器 / 系统 ----
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---- 本地配置（可能有你自己的端口、设备名、Token）----
+.env
+.env.local
+*.local.json

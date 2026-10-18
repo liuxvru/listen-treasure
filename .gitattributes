@@ -1,0 +1,6 @@
+# 统一换行符：仓库里存 LF，Windows 上检出 CRLF 也行，但不要自动转换造成假 diff
+* text=auto eol=lf
+*.bat text eol=crlf
+*.png binary
+*.webp binary
+*.wav binary

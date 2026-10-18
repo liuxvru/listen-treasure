@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>行商听声鉴宝 · 实时声音识别</title>
+    <link rel="stylesheet" href="/static/ui/styles.css" />
+  </head>
+  <body>
+    <!-- 顶部：品牌 + 连接状态 -->
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">◉</span>
+        <div class="brand-text">
+          <h1>行商听声鉴宝</h1>
+          <p class="sub">监听游戏声音，实时识别拾取音效 · 138 件藏品图鉴</p>
+        </div>
+      </div>
+      <div class="topbar-right">
+        <div class="stat-pills" id="stat-pills">
+          <span class="pill" id="pill-sounds"><b>–</b> 段音效</span>
+          <span class="pill" id="pill-items"><b>–</b> 件藏品</span>
+          <span class="pill" id="pill-rate"><b>–</b> Hz</span>
+        </div>
+        <button class="btn ghost sync-btn" id="btn-sync" type="button"
+                title="从暗区情报站重新抓取音频、藏品图和对应关系">
+          <span class="sync-icon" aria-hidden="true">⟳</span>
+          <span id="sync-label">同步图鉴</span>
+        </button>
+        <div class="status" id="status">
+          <span class="dot" id="status-dot"></span>
+          <span id="status-text">正在连接…</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- 错误提示条（可关闭，不使用 alert） -->
+    <div class="error-stack" id="error-stack" aria-live="polite"></div>
+
+    <main class="layout">
+      <!-- ============ 左栏：实时识别 ============ -->
+      <aside class="col-left">
+        <section class="panel">
+          <div class="panel-head">
+            <h2>音频源</h2>
+            <span class="panel-hint" id="source-hint">系统回环</span>
+          </div>
+
+          <div class="seg" id="source-tabs" role="tablist">
+            <button class="seg-btn active" data-kind="loopback" role="tab" aria-selected="true">
+              🔊 系统声音（回环）
+            </button>
+            <button class="seg-btn" data-kind="input" role="tab" aria-selected="false">
+              🎙 麦克风
+            </button>
+          </div>
+
+          <div class="device-row">
+            <select id="device-select" aria-label="选择音频设备">
+              <option value="">加载设备中…</option>
+            </select>
+            <button class="btn ghost icon" id="btn-refresh-devices" title="刷新设备列表" aria-label="刷新设备列表">
+              ↻
+            </button>
+          </div>
+          <p class="hint" id="device-hint">选择「系统声音」可直接录到游戏输出，无需开麦。</p>
+
+          <button class="btn live-btn" id="btn-live" data-state="idle">
+            <span class="live-icon" id="live-icon">▶</span>
+            <span id="live-label">开始监听</span>
+          </button>
+
+          <div class="live-meta" id="live-meta">
+            <span id="live-elapsed">00:00.0</span>
+            <span class="sep">·</span>
+            <span id="live-device">未开始</span>
+          </div>
+        </section>
+
+        <!-- 电平表 -->
+        <section class="panel">
+          <div class="panel-head">
+            <h2>实时电平</h2>
+            <span class="panel-hint" id="level-readout">−∞ dB</span>
+          </div>
+          <div class="meter" id="meter" data-active="false">
+            <div class="meter-bars" id="meter-bars"></div>
+          </div>
+          <div class="meter-legend">
+            <span>安静</span>
+            <span id="meter-active-label">等待声音</span>
+            <span>响亮</span>
+          </div>
+        </section>
+
+        <!-- 手机端入口：扫码，打游戏时不用切回电脑 -->
+        <section class="panel phone-panel" id="phone-panel">
+          <div class="panel-head">
+            <h2>手机上用</h2>
+            <span class="panel-hint" id="phone-hint">扫码打开</span>
+          </div>
+          <div class="phone-body">
+            <div class="phone-qr" id="phone-qr" title="用手机相机扫这个码">
+              <span class="qr-loading">生成中…</span>
+            </div>
+            <div class="phone-copy">
+              <p class="phone-url mono" id="phone-url">—</p>
+              <p class="hint" id="phone-tip">
+                手机连同一个 Wi-Fi，扫左边的码就能打开手机版界面。
+              </p>
+            </div>
+          </div>
+        </section>
+
+        <!-- 当前判定 -->
+        <section class="panel verdict-panel" id="verdict-panel" data-has="false">
+          <div class="panel-head">
+            <h2>当前判定</h2>
+            <span class="panel-hint" id="verdict-count">累计 0 次</span>
+          </div>
+          <div class="verdict-main">
+            <div class="verdict-name" id="verdict-name">等待声音…</div>
+            <div class="verdict-facts" id="verdict-facts"></div>
+          </div>
+          <div class="verdict-bar"><i id="verdict-bar-fill"></i></div>
+        </section>
+
+        <!-- 本次藏品：按占格分组，同占格排一行，价值从高到低 -->
+        <section class="panel stash-panel" id="stash-panel" data-has="false">
+          <div class="panel-head">
+            <h2>本次藏品</h2>
+            <span class="panel-hint" id="stash-hint">等待识别</span>
+          </div>
+          <div class="stash-rows" id="stash-rows">
+            <p class="stash-empty" id="stash-empty">
+              识别到音效后，这里按占格分组列出藏品：同一占格的排一行，行内价值从高到低。
+            </p>
+          </div>
+        </section>
+
+        <!-- 文件识别 -->
+        <section class="panel">
+          <div class="panel-head">
+            <h2>文件识别</h2>
+            <span class="panel-hint">wav / mp3 / ogg / flac / m4a</span>
+          </div>
+          <div class="dropzone" id="dropzone" role="button" tabindex="0">
+            <span class="dz-icon" aria-hidden="true">📁</span>
+            <span class="dz-text">点击选择音频，或把文件拖到这里</span>
+          </div>
+          <input type="file" id="file-input" accept=".wav,.mp3,.ogg,.oga,.flac,.m4a,.aac,audio/*" hidden />
+          <div class="file-progress" id="file-progress" hidden>
+            <div class="fp-bar"><i id="fp-fill"></i></div>
+            <p class="fp-text" id="fp-text">识别中…</p>
+          </div>
+        </section>
+
+        <!-- 命中记录 -->
+        <section class="panel hits-panel">
+          <div class="panel-head">
+            <h2>命中记录</h2>
+            <button class="btn ghost tiny" id="btn-clear-hits" title="清空命中记录">清空</button>
+          </div>
+          <ul class="hits-list" id="hits-list">
+            <li class="hits-empty" id="hits-empty">还没有命中，开始监听后这里会记录每一次识别。</li>
+          </ul>
+        </section>
+      </aside>
+
+      <!-- ============ 右栏：声音图鉴 ============ -->
+      <section class="col-right">
+        <div class="right-head">
+          <div class="right-title">
+            <h2>声音图鉴</h2>
+            <p class="sub" id="library-sub">正在加载声音库…</p>
+          </div>
+          <div class="search-box">
+            <span class="search-icon" aria-hidden="true">🔍</span>
+            <input
+              type="search"
+              id="search-input"
+              placeholder="搜索音效名或藏品名…"
+              autocomplete="off"
+              aria-label="搜索音效名或藏品名"
+            />
+            <button class="search-clear" id="search-clear" title="清空搜索" aria-label="清空搜索">×</button>
+          </div>
+        </div>
+
+        <!-- 加载骨架屏 -->
+        <div class="skeleton-grid" id="skeleton-grid" aria-hidden="true">
+          <div class="skeleton-card"></div>
+          <div class="skeleton-card"></div>
+          <div class="skeleton-card"></div>
+          <div class="skeleton-card"></div>
+          <div class="skeleton-card"></div>
+          <div class="skeleton-card"></div>
+        </div>
+
+        <div class="card-grid" id="card-grid" hidden></div>
+
+        <div class="empty-state" id="empty-state" hidden>
+          <div class="empty-icon">🔇</div>
+          <p id="empty-text">没有匹配的音效或藏品。</p>
+          <button class="btn ghost small" id="btn-reset-search">清空搜索条件</button>
+        </div>
+      </section>
+    </main>
+
+    <!-- 试听提示（右下角浮层） -->
+    <div class="toast" id="toast" hidden></div>
+
+    <script type="module" src="/static/ui/app.js"></script>
+  </body>
+</html>

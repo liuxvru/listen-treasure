@@ -1,0 +1,28 @@
+# 行商听声鉴宝 · Python 依赖
+# 安装：python -m pip install -r requirements.txt
+#
+# 版本号是本机实测通过的组合（Windows 10/11 + Python 3.12）。
+
+# --- 数值与信号处理（识别核心） ---
+numpy>=1.26,<3
+scipy>=1.11,<2
+
+# --- 音频文件读写（wav / flac / ogg / mp3 都走 libsndfile） ---
+soundfile>=0.12,<1
+
+# --- 采集：pyaudiowpatch 是 PyAudio 的 WASAPI 分支，只有它支持“系统声音回环” ---
+# 普通 pyaudio 录不到扬声器输出，这是整个实时功能的前提。
+pyaudiowpatch>=0.2.12,<1
+
+# --- Web 后端 ---
+fastapi>=0.110,<1
+uvicorn>=0.27,<1
+pydantic>=2,<3
+python-multipart>=0.0.9  # /api/recognize 的文件上传需要
+
+# --- 手机端二维码（纯 Python，无编译依赖，只有几百 KB） ---
+# 没装服务照样能跑，只是 /api/qr.svg 返回 503，手机上得手动输网址。
+segno>=1.5,<2
+
+# --- 同步图鉴：把站点上 14MB 的原图压成 128px 缩略图 ---
+pillow>=10,<13
